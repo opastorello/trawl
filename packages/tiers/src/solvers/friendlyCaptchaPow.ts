@@ -1,4 +1,5 @@
 import { blake2b } from "@noble/hashes/blake2b"
+import { solveNativeFriendlyCaptcha } from "../utils/nativePow"
 
 export interface FriendlyCaptchaPuzzle {
   signature: string
@@ -116,9 +117,43 @@ export function solveFriendlyCaptchaV1(
   return { response, elapsedMs }
 }
 
+export async function solveFriendlyCaptchaV1Native(
+  puzzleInput: string,
+  timeoutMs = 60000,
+  signal?: AbortSignal,
+): Promise<FriendlyCaptchaSolution | undefined> {
+  const start = Date.now()
+  const parts = puzzleInput.split(".")
+  if (parts.length !== 2) return undefined
+
+  const [signature, puzzleBase64] = parts
+  const decoded = decodePuzzle(puzzleBase64)
+  if (!decoded) return undefined
+
+  const nativeSolutions = await solveNativeFriendlyCaptcha(puzzleBase64, timeoutMs, signal)
+  if (!nativeSolutions || nativeSolutions.length !== decoded.nSolutions) return undefined
+
+  const solutions = new Uint8Array(decoded.nSolutions * 8)
+  for (const sol of nativeSolutions) {
+    const offset = sol.index * 8
+    solutions[offset] = sol.index
+    // bytes 1-3 stay 0
+    solutions[offset + 4] = sol.nonce & 0xff
+    solutions[offset + 5] = (sol.nonce >> 8) & 0xff
+    solutions[offset + 6] = (sol.nonce >> 16) & 0xff
+    solutions[offset + 7] = (sol.nonce >> 24) & 0xff
+  }
+
+  const elapsedMs = Date.now() - start
+  const response = buildResponse(signature, decoded.puzzle, solutions, elapsedMs)
+
+  return { response, elapsedMs }
+}
+
 export async function fetchAndSolveFriendlyCaptcha(
   sitekey: string,
   signal?: AbortSignal,
+  useNative = true,
 ): Promise<FriendlyCaptchaSolution | undefined> {
   try {
     const response = await fetch(`https://api.friendlycaptcha.com/api/v1/puzzle?sitekey=${sitekey}`, {
@@ -129,6 +164,11 @@ export async function fetchAndSolveFriendlyCaptcha(
 
     const data = (await response.json()) as { puzzle?: string }
     if (typeof data.puzzle !== "string") return undefined
+
+    if (useNative) {
+      const nativeResult = await solveFriendlyCaptchaV1Native(data.puzzle, 60000, signal)
+      if (nativeResult) return nativeResult
+    }
 
     return solveFriendlyCaptchaV1(data.puzzle)
   } catch {
