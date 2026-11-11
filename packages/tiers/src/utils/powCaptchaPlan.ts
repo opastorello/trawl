@@ -100,7 +100,7 @@ export function planAltcha(html: string, _pageUrl: string): PowCaptchaPlan | und
     submit: async (_timeoutMs, signal) => {
       if (signal?.aborted || !challengeJson) return undefined
 
-      const solution = solveAltcha(challengeJson)
+      const solution = await solveAltcha(challengeJson)
       if (!solution) return undefined
 
       const payload = btoa(

@@ -4,12 +4,12 @@ import { type AltchaChallenge, buildAltchaPayload, solveAltcha, verifyAltchaSolu
 
 describe("ALTCHA PoW solver", () => {
   describe("SHA-256 legacy challenge mode", () => {
-    test("solves a simple SHA-256 challenge", () => {
+    test("solves a simple SHA-256 challenge", async () => {
       const salt = "test-salt-12345"
       const targetCounter = 42
       const challenge = createHash("sha256").update(`${salt}${targetCounter}`).digest("hex")
 
-      const result = solveAltcha({
+      const result = await solveAltcha({
         algorithm: "SHA-256",
         salt,
         challenge,
@@ -20,7 +20,7 @@ describe("ALTCHA PoW solver", () => {
       expect(result?.solution.derivedKey).toBe(challenge)
     })
 
-    test("verifies SHA-256 solution", () => {
+    test("verifies SHA-256 solution", async () => {
       const salt = "verify-test"
       const targetCounter = 100
       const challenge = createHash("sha256").update(`${salt}${targetCounter}`).digest("hex")
@@ -31,17 +31,17 @@ describe("ALTCHA PoW solver", () => {
         challenge,
       }
 
-      expect(verifyAltchaSolution(challengeObj, targetCounter)).toBe(true)
-      expect(verifyAltchaSolution(challengeObj, targetCounter + 1)).toBe(false)
+      expect(await verifyAltchaSolution(challengeObj, targetCounter)).toBe(true)
+      expect(await verifyAltchaSolution(challengeObj, targetCounter + 1)).toBe(false)
     })
   })
 
   describe("PBKDF2 prefix mode", () => {
-    test("solves PBKDF2-SHA-256 challenge", () => {
+    test("solves PBKDF2-SHA-256 challenge", async () => {
       const salt = "abcd1234abcd1234abcd1234abcd1234"
       const keyPrefix = "00"
 
-      const result = solveAltcha(
+      const result = await solveAltcha(
         {
           algorithm: "PBKDF2-SHA-256",
           salt,
@@ -55,11 +55,11 @@ describe("ALTCHA PoW solver", () => {
       expect(result?.solution.derivedKey.startsWith(keyPrefix)).toBe(true)
     })
 
-    test("verifies PBKDF2 solution", () => {
+    test("verifies PBKDF2 solution", async () => {
       const salt = "abcd1234abcd1234abcd1234abcd1234"
       const keyPrefix = "0"
 
-      const result = solveAltcha(
+      const result = await solveAltcha(
         {
           algorithm: "PBKDF2-SHA-256",
           salt,
@@ -72,18 +72,21 @@ describe("ALTCHA PoW solver", () => {
       expect(result).toBeDefined()
       if (result) {
         expect(
-          verifyAltchaSolution({ algorithm: "PBKDF2-SHA-256", salt, keyPrefix, cost: 100 }, result.solution.counter),
+          await verifyAltchaSolution(
+            { algorithm: "PBKDF2-SHA-256", salt, keyPrefix, cost: 100 },
+            result.solution.counter,
+          ),
         ).toBe(true)
       }
     })
   })
 
   describe("Scrypt prefix mode", () => {
-    test("solves SCRYPT challenge", () => {
+    test("solves SCRYPT challenge", async () => {
       const salt = "1234567890abcdef1234567890abcdef"
       const keyPrefix = "0"
 
-      const result = solveAltcha(
+      const result = await solveAltcha(
         {
           algorithm: "SCRYPT",
           salt,
@@ -100,13 +103,62 @@ describe("ALTCHA PoW solver", () => {
     })
   })
 
+  describe("Argon2id prefix mode", () => {
+    test("solves ARGON2ID challenge", async () => {
+      const salt = "1234567890abcdef1234567890abcdef"
+      const keyPrefix = "0"
+
+      const result = await solveAltcha(
+        {
+          algorithm: "ARGON2ID",
+          salt,
+          keyPrefix,
+          cost: 2,
+          memoryCost: 1024,
+          parallelism: 1,
+        },
+        100,
+      )
+
+      expect(result).toBeDefined()
+      expect(result?.solution.derivedKey.startsWith(keyPrefix)).toBe(true)
+    }, 30000)
+
+    test("verifies ARGON2ID solution", async () => {
+      const salt = "abcd1234abcd1234abcd1234abcd1234"
+      const keyPrefix = "0"
+
+      const result = await solveAltcha(
+        {
+          algorithm: "ARGON2ID",
+          salt,
+          keyPrefix,
+          cost: 2,
+          memoryCost: 1024,
+          parallelism: 1,
+        },
+        100,
+      )
+
+      expect(result).toBeDefined()
+      if (result) {
+        expect(
+          await verifyAltchaSolution(
+            { algorithm: "ARGON2ID", salt, keyPrefix, cost: 2, memoryCost: 1024, parallelism: 1 },
+            result.solution.counter,
+          ),
+        ).toBe(true)
+      }
+    }, 30000)
+  })
+
   describe("algorithm normalization", () => {
-    test("handles various algorithm name formats", () => {
+    test("handles various algorithm name formats", async () => {
       const salt = "test1234567890ab"
       const challenge = createHash("sha256").update(`${salt}1`).digest("hex")
 
       for (const algo of ["SHA-256", "sha-256", "SHA256", "sha256"]) {
-        const result = solveAltcha({
+        const result = await solveAltcha({
           algorithm: algo as any,
           salt,
           challenge,
@@ -116,8 +168,8 @@ describe("ALTCHA PoW solver", () => {
       }
     })
 
-    test("rejects unsupported algorithms", () => {
-      const result = solveAltcha({
+    test("rejects unsupported algorithms", async () => {
+      const result = await solveAltcha({
         algorithm: "UNSUPPORTED" as any,
         salt: "test",
         challenge: "test",
@@ -127,11 +179,11 @@ describe("ALTCHA PoW solver", () => {
   })
 
   describe("payload building", () => {
-    test("builds correct base64 payload", () => {
+    test("builds correct base64 payload", async () => {
       const salt = "payload-test-salt"
       const challenge = createHash("sha256").update(`${salt}5`).digest("hex")
 
-      const result = solveAltcha({
+      const result = await solveAltcha({
         algorithm: "SHA-256",
         salt,
         challenge,
@@ -148,12 +200,12 @@ describe("ALTCHA PoW solver", () => {
   })
 
   describe("performance", () => {
-    test("solves within reasonable time", () => {
+    test("solves within reasonable time", async () => {
       const salt = "perf-test-12345678901234567890"
       const challenge = createHash("sha256").update(`${salt}500`).digest("hex")
 
       const start = Date.now()
-      const result = solveAltcha({
+      const result = await solveAltcha({
         algorithm: "SHA-256",
         salt,
         challenge,
@@ -167,8 +219,8 @@ describe("ALTCHA PoW solver", () => {
   })
 
   describe("edge cases", () => {
-    test("returns undefined when max iterations exceeded", () => {
-      const result = solveAltcha(
+    test("returns undefined when max iterations exceeded", async () => {
+      const result = await solveAltcha(
         {
           algorithm: "SHA-256",
           salt: "impossible",
@@ -179,8 +231,8 @@ describe("ALTCHA PoW solver", () => {
       expect(result).toBeUndefined()
     })
 
-    test("handles empty keyPrefix", () => {
-      const result = solveAltcha({
+    test("handles empty keyPrefix", async () => {
+      const result = await solveAltcha({
         algorithm: "PBKDF2-SHA-256",
         salt: "test1234567890ab",
         keyPrefix: "",

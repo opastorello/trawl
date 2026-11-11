@@ -1,10 +1,7 @@
 import { describe, expect, test } from "bun:test"
+import { createHash } from "node:crypto"
 import { solveAltcha, verifyAltchaSolution } from "../src/solvers/altchaPow"
-import {
-  fetchAndSolveFriendlyCaptcha,
-  solveFriendlyCaptchaV1,
-  verifyFriendlyCaptchaSolution,
-} from "../src/solvers/friendlyCaptchaPow"
+import { fetchAndSolveFriendlyCaptcha } from "../src/solvers/friendlyCaptchaPow"
 
 describe("Real-world PoW solver tests", () => {
   describe("Friendly Captcha v1", () => {
@@ -28,7 +25,7 @@ describe("Real-world PoW solver tests", () => {
   })
 
   describe("ALTCHA", () => {
-    test("solves PBKDF2/SHA-256 challenge from Altcha Playground", () => {
+    test("solves PBKDF2/SHA-256 challenge from Altcha Playground", async () => {
       const challenge = {
         algorithm: "PBKDF2-SHA-256" as const,
         salt: "4db2e1ee9f2c4b1a8c3d5e6f7a8b9c0d",
@@ -42,7 +39,7 @@ describe("Real-world PoW solver tests", () => {
       console.log(`[ALTCHA] Cost: ${challenge.cost}`)
 
       const start = Date.now()
-      const solution = solveAltcha(challenge, 50000)
+      const solution = await solveAltcha(challenge, 50000)
       const elapsed = Date.now() - start
 
       expect(solution).toBeDefined()
@@ -52,12 +49,11 @@ describe("Real-world PoW solver tests", () => {
         console.log(`[ALTCHA] DerivedKey: ${solution.solution.derivedKey.slice(0, 32)}...`)
 
         expect(solution.solution.derivedKey.startsWith(challenge.keyPrefix)).toBe(true)
-        expect(verifyAltchaSolution(challenge, solution.solution.counter)).toBe(true)
+        expect(await verifyAltchaSolution(challenge, solution.solution.counter)).toBe(true)
       }
     }, 120000)
 
-    test("solves SHA-256 legacy challenge", () => {
-      const { createHash } = require("node:crypto")
+    test("solves SHA-256 legacy challenge", async () => {
       const salt = "test-salt-12345"
       const targetCounter = 500
       const challengeHash = createHash("sha256").update(`${salt}${targetCounter}`).digest("hex")
@@ -69,7 +65,7 @@ describe("Real-world PoW solver tests", () => {
       }
 
       console.log(`[ALTCHA-SHA] Solving SHA-256 challenge...`)
-      const solution = solveAltcha(challenge)
+      const solution = await solveAltcha(challenge)
 
       expect(solution).toBeDefined()
       if (solution) {
@@ -78,7 +74,7 @@ describe("Real-world PoW solver tests", () => {
       }
     })
 
-    test("solves Scrypt challenge", () => {
+    test("solves Scrypt challenge", async () => {
       const challenge = {
         algorithm: "SCRYPT" as const,
         salt: "1234567890abcdef1234567890abcdef",
@@ -90,7 +86,7 @@ describe("Real-world PoW solver tests", () => {
 
       console.log(`[ALTCHA-SCRYPT] Solving Scrypt challenge...`)
       const start = Date.now()
-      const solution = solveAltcha(challenge, 500)
+      const solution = await solveAltcha(challenge, 500)
 
       expect(solution).toBeDefined()
       if (solution) {
@@ -99,5 +95,28 @@ describe("Real-world PoW solver tests", () => {
         expect(solution.solution.derivedKey.startsWith(challenge.keyPrefix)).toBe(true)
       }
     }, 30000)
+
+    test("solves Argon2id challenge", async () => {
+      const challenge = {
+        algorithm: "ARGON2ID" as const,
+        salt: "1234567890abcdef1234567890abcdef",
+        keyPrefix: "0",
+        cost: 2,
+        memoryCost: 1024,
+        parallelism: 1,
+      }
+
+      console.log(`[ALTCHA-ARGON2] Solving Argon2id challenge...`)
+      const start = Date.now()
+      const solution = await solveAltcha(challenge, 100)
+
+      expect(solution).toBeDefined()
+      if (solution) {
+        console.log(`[ALTCHA-ARGON2] Solved in ${Date.now() - start}ms`)
+        console.log(`[ALTCHA-ARGON2] Counter: ${solution.solution.counter}`)
+        expect(solution.solution.derivedKey.startsWith(challenge.keyPrefix)).toBe(true)
+        expect(await verifyAltchaSolution(challenge, solution.solution.counter)).toBe(true)
+      }
+    }, 60000)
   })
 })

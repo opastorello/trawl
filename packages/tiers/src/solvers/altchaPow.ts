@@ -1,4 +1,5 @@
 import { createHash, pbkdf2Sync, scryptSync } from "node:crypto"
+import { argon2id } from "hash-wasm"
 
 export type AltchaAlgorithm =
   | "SHA-256"
@@ -8,6 +9,7 @@ export type AltchaAlgorithm =
   | "PBKDF2-SHA-384"
   | "PBKDF2-SHA-512"
   | "SCRYPT"
+  | "ARGON2ID"
 
 export interface AltchaChallenge {
   algorithm: AltchaAlgorithm
@@ -50,6 +52,9 @@ function normalizeAlgorithm(algo: string): AltchaAlgorithm | undefined {
     "PBKDF2-SHA512": "PBKDF2-SHA-512",
     "PBKDF2-SHA-512": "PBKDF2-SHA-512",
     SCRYPT: "SCRYPT",
+    ARGON2ID: "ARGON2ID",
+    "ARGON2-ID": "ARGON2ID",
+    ARGON2: "ARGON2ID",
   }
   return map[normalized]
 }
@@ -143,7 +148,38 @@ function solveScrypt(
   return undefined
 }
 
-export function solveAltcha(challenge: AltchaChallenge, maxIterations = 100000): AltchaSolution | undefined {
+async function solveArgon2id(
+  salt: string,
+  keyPrefix: string,
+  timeCost: number,
+  memoryCost: number,
+  parallelism: number,
+  maxIterations: number,
+): Promise<{ counter: number; derivedKey: string } | undefined> {
+  const saltBytes = Buffer.from(salt, "hex")
+
+  for (let counter = 0; counter < maxIterations; counter++) {
+    const password = buildPassword(salt, counter)
+    const key = await argon2id({
+      password,
+      salt: saltBytes,
+      iterations: timeCost,
+      memorySize: memoryCost,
+      parallelism,
+      hashLength: 32,
+      outputType: "hex",
+    })
+    if (key.startsWith(keyPrefix)) {
+      return { counter, derivedKey: key }
+    }
+  }
+  return undefined
+}
+
+export async function solveAltcha(
+  challenge: AltchaChallenge,
+  maxIterations = 100000,
+): Promise<AltchaSolution | undefined> {
   const start = Date.now()
   const algorithm = normalizeAlgorithm(challenge.algorithm)
   if (!algorithm) return undefined
@@ -166,6 +202,12 @@ export function solveAltcha(challenge: AltchaChallenge, maxIterations = 100000):
     const r = memoryCost || 8
     const p = parallelism || 1
     result = solveScrypt(salt, keyPrefix, n, r, p, maxIterations)
+  } else if (algorithm === "ARGON2ID") {
+    if (!keyPrefix) return undefined
+    const t = cost || 3
+    const m = memoryCost || 65536
+    const p = parallelism || 1
+    result = await solveArgon2id(salt, keyPrefix, t, m, p, maxIterations)
   }
 
   if (!result) return undefined
@@ -188,7 +230,7 @@ export function buildAltchaPayload(solution: AltchaSolution): string {
   return btoa(JSON.stringify(payload))
 }
 
-export function verifyAltchaSolution(challenge: AltchaChallenge, counter: number): boolean {
+export async function verifyAltchaSolution(challenge: AltchaChallenge, counter: number): Promise<boolean> {
   const algorithm = normalizeAlgorithm(challenge.algorithm)
   if (!algorithm) return false
 
@@ -227,6 +269,23 @@ export function verifyAltchaSolution(challenge: AltchaChallenge, counter: number
     const p = parallelism || 1
     const key = scryptSync(password, saltBytes, 32, { N: n, r, p })
     return key.toString("hex").startsWith(keyPrefix)
+  } else if (algorithm === "ARGON2ID") {
+    if (!keyPrefix) return false
+    const saltBytes = Buffer.from(salt, "hex")
+    const password = buildPassword(salt, counter)
+    const t = cost || 3
+    const m = memoryCost || 65536
+    const p = parallelism || 1
+    const key = await argon2id({
+      password,
+      salt: saltBytes,
+      iterations: t,
+      memorySize: m,
+      parallelism: p,
+      hashLength: 32,
+      outputType: "hex",
+    })
+    return key.startsWith(keyPrefix)
   }
 
   return false
